@@ -1,0 +1,7 @@
+# 忽略 build 文件夹
+build/
+
+# 忽略 album 文件夹
+album/
+
+music/
