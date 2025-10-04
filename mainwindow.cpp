@@ -5,6 +5,8 @@
 #include <QDebug>
 #include "wizard.h"
 #include "protree.h"
+#include <QFileDialog>
+#include "protreewidget.h"
 
 /*
  * 这是主窗口的构造函数，负责初始化用户界面。它创建了文件菜单和设置菜单，
@@ -37,11 +39,22 @@ MainWindow::MainWindow(QWidget *parent)
     menu_set->addAction(act_music);
 
     // 连接信号和槽
-    connect(act_create_pro, &QAction::triggered, this, &MainWindow::SlotCreatePro);
 
+    // 创建项目
+    connect(act_create_pro, &QAction::triggered, this, &MainWindow::SlotCreatePro);
+    // 打开项目
+    connect(act_open_pro, &QAction::triggered, this, &MainWindow::SlotOpenPro);
+
+    // 创建项目树
     _protree = new ProTree();
+    // 将项目树加载到页面上
     ui->proLayout->addWidget(_protree);
 
+    // 拿到项目树页面中的项目树窗口
+    QTreeWidget* tree_widget = dynamic_cast<ProTree*>(_protree)->GetTreeWidget();
+    auto * pro_tree_widget = dynamic_cast<ProTreeWidget*>(tree_widget);
+
+    connect(this, &MainWindow::SigOpenPro, pro_tree_widget, &ProTreeWidget::SlotOpenPro);
 }
 
 MainWindow::~MainWindow()
@@ -73,6 +86,37 @@ void MainWindow::SlotCreatePro(bool)
     // 断开所有信号 todo...
 }
 
+// MainWindow 类的槽函数，用于打开一个项目目录
+void MainWindow::SlotOpenPro(bool)
+{
+    // 创建一个文件对话框对象
+    QFileDialog file_dialog;
+    // 设置文件模式为选择目录（而不是单个文件）
+    file_dialog.setFileMode(QFileDialog::Directory);
+    // 设置对话框标题
+    file_dialog.setWindowTitle(tr("选择导入的文件夹"));
+    // 设置对话框默认打开的路径为当前程序的运行目录
+    file_dialog.setDirectory(QDir::currentPath());
+    // 设置文件视图模式为详细信息（列表+属性）
+    file_dialog.setViewMode(QFileDialog::Detail);
+
+    QStringList fileNames;
+    // 打开文件对话框，如果用户点击了“确定”按钮（exec()返回非0值）
+    if(file_dialog.exec()){
+        // 获取用户选择的目录（可能是多个，但这里只取第一个）
+        fileNames = file_dialog.selectedFiles();
+    }
+
+    // 如果用户没有选择任何目录，则直接返回
+    if(fileNames.length() <= 0){
+        return;
+    }
+
+    // 获取第一个用户选择的路径
+    QString import_path = fileNames.at(0);
+    // 发出信号，将选择的目录路径传递出去
+    emit SigOpenPro(import_path);
+}
 
 
 

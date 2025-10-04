@@ -19,6 +19,11 @@ ProTree::~ProTree()
     delete ui;
 }
 
+QTreeWidget *ProTree::GetTreeWidget()
+{
+    return ui->treeWidget;
+}
+
 /*
  * 向项目树中添加新项目的函数。
  * 它接收项目名称和路径作为参数，并调用自定义树控件的方法将项目添加到树形结构中。

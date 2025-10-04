@@ -71,7 +71,7 @@ void ProTreeThread::CreateProTree(const QString &src_path,
 
     // 打开源目录，准备遍历
     QDir import_dir(src_path);
-    QStringList nameFilters;
+    // QStringList nameFilters;
     import_dir.setFilter(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot); // 过滤掉 "." 和 ".."
     import_dir.setSorting(QDir::Name);  // 按名称排序
     QFileInfoList list = import_dir.entryInfoList();

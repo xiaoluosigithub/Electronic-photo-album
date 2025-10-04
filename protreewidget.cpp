@@ -5,8 +5,13 @@
 #include <QGuiApplication>
 #include <QMenu>
 #include <QFileDialog>
+#include "removeprodialog.h"
 
-ProTreeWidget::ProTreeWidget(QWidget *parent) {
+ProTreeWidget::ProTreeWidget(QWidget *parent):QTreeWidget(parent),
+    _right_btn_item(nullptr), _active_item(nullptr), _dialog_progress(nullptr),_selected_item(nullptr),
+    _thread_create_pro(nullptr), _thread_open_pro(nullptr),_open_progressdlg(nullptr)
+
+{
     // 隐藏树控件的表头（不显示列标题），更像一个文件浏览树
     this->setHeaderHidden(true);
 
@@ -26,6 +31,11 @@ ProTreeWidget::ProTreeWidget(QWidget *parent) {
     // 连接动作触发信号与槽函数
     // 当用户点击“导入文件”菜单项时，触发 SlotImport() 槽函数
     connect(_action_import, &QAction::triggered, this, &ProTreeWidget::SlotImport);
+
+    connect(_action_setstart, &QAction::triggered, this, &ProTreeWidget::SlotSetActive);
+
+    connect(_action_closepro, &QAction::triggered, this, &ProTreeWidget::SlotClosePro);
+
 }
 
 void ProTreeWidget::AddProTree(const QString &name, const QString &path)
@@ -142,6 +152,49 @@ void ProTreeWidget::SlotImport()
     _dialog_progress->exec();                         // 显示对话框并阻塞等待线程完成
 }
 
+void ProTreeWidget::SlotSetActive()
+{
+    if(!_right_btn_item){
+        return;
+    }
+
+    QFont nullFont;
+    nullFont.setBold(false);
+    if(_active_item){
+        _active_item->setFont(0, nullFont);
+    }
+
+    _active_item = _right_btn_item;
+    nullFont.setBold(true);
+    _active_item->setFont(0, nullFont);
+}
+
+void ProTreeWidget::SlotClosePro()
+{
+    RemoveProDialog remove_pro_dialog;
+    auto res = remove_pro_dialog.exec();
+    if(res != QDialog::Accepted){
+        return;
+    }
+    bool b_remove = remove_pro_dialog.IsRemoved();
+    auto index_right_btn = this->indexOfTopLevelItem(_right_btn_item);
+    auto * protreeitem = dynamic_cast<ProTreeItem*>(_right_btn_item);
+    // auto * selecteditem = dynamic_cast<ProTreeItem>(_selected_item);
+    auto delete_path = protreeitem->GetPath();
+    _set_path.remove(delete_path);
+    if(b_remove){
+        QDir delete_dir(delete_path);
+        delete_dir.removeRecursively();
+    }
+
+    if(protreeitem == _active_item){
+        _active_item = nullptr;
+    }
+
+    delete this->takeTopLevelItem(index_right_btn);
+    _right_btn_item = nullptr;
+}
+
 // 线程每处理一个文件/文件夹，会发出的进度更新信号
 void ProTreeWidget::SlotUpdateProgress(int count)
 {
@@ -172,6 +225,82 @@ void ProTreeWidget::SlotCancelProgress()
     _dialog_progress = nullptr;                // 防止悬空指针
 }
 
+void ProTreeWidget::SlotUpOpenProgress(int count)
+{
+    if(!_open_progressdlg){  // 如果进度条不存在，直接返回
+        return;
+    }
 
+    // 防止超过最大值，使用取模处理
+    if(count >= PROGRESS_MAX){
+        _open_progressdlg->setValue(count % PROGRESS_MAX);
+    } else {
+        _open_progressdlg->setValue(count);
+    }
+}
+
+void ProTreeWidget::SlotFinishOpenProgress()
+{
+    if(!_open_progressdlg){  // 如果进度条不存在，直接返回
+        return;
+    }
+    _open_progressdlg->setValue(PROGRESS_MAX);
+    delete _open_progressdlg;
+    _open_progressdlg = nullptr;
+}
+
+void ProTreeWidget::SlotCancelOpenProgress()
+{
+    emit SigCancelOpenProgress();                  // 发信号通知线程停止
+    delete _open_progressdlg;                   // 删除对话框
+    _open_progressdlg = nullptr;                // 防止悬空指针
+}
+
+// 打开项目
+void ProTreeWidget::SlotOpenPro(const QString &path)
+{
+    // 如果路径已经在集合中，说明项目已经打开过，直接返回，不再重复打开
+    if(_set_path.find(path) != _set_path.end()){
+        return;
+    }
+
+    // 将路径插入集合，防止重复打开
+    _set_path.insert(path);
+
+    int file_count = 0;               // 用于统计打开项目中的文件数量
+    QDir pro_dir(path);               // 创建一个 QDir 对象，用于操作目录
+    QString proname = pro_dir.dirName(); // 获取目录名称，即项目名称
+
+    // 创建一个线程对象，用于递归遍历目录，加载项目树
+    // std::make_shared 创建一个 shared_ptr，确保线程对象在使用过程中不会被释放
+    _thread_open_pro = std::make_shared<OpenTreeThread>(path, file_count, this, nullptr);
+
+    // 创建一个进度对话框，用于显示打开项目的进度
+    _open_progressdlg = new QProgressDialog(this);
+
+    // 连接线程的信号与槽函数
+    // 当线程更新进度时，调用 SlotUpOpenProgress 更新 UI
+    connect(_thread_open_pro.get(), &OpenTreeThread::SigUpdateProgress,
+            this, &ProTreeWidget::SlotUpOpenProgress);
+    // 当线程完成操作时，调用 SlotFinishOpenProgress
+    connect(_thread_open_pro.get(), &OpenTreeThread::SigFinishProgress,
+            this, &ProTreeWidget::SlotFinishOpenProgress);
+
+    // 当用户点击进度对话框的取消按钮时，触发槽函数取消线程操作
+    connect(_open_progressdlg, &QProgressDialog::canceled,
+            this, &ProTreeWidget::SlotCancelOpenProgress);
+    // 自定义信号，发射后通知线程停止处理
+    connect(this, &ProTreeWidget::SigCancelOpenProgress,
+            _thread_open_pro.get(), &OpenTreeThread::SlotCancelProgress);
+
+    // 启动线程，开始处理目录遍历
+    _thread_open_pro->start();
+
+    // 配置进度对话框显示属性
+    _open_progressdlg->setWindowTitle("Please wait..."); // 设置对话框标题
+    _open_progressdlg->setFixedWidth(PROGRESS_WIDTH);    // 固定宽度，防止被拉伸
+    _open_progressdlg->setRange(0, PROGRESS_WIDTH);      // 设置进度条范围
+    _open_progressdlg->exec();                           // 显示对话框并阻塞当前线程，直到对话框关闭
+}
 
 
